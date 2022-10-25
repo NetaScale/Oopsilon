@@ -1,0 +1,5 @@
+.cache/
+.vscode/
+build/
+linbld/
+compile_commands.json
