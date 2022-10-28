@@ -3,3 +3,5 @@
 build/
 linbld/
 compile_commands.json
+subprojects/cxxshim*
+subprojects/frig*

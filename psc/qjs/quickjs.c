@@ -113,7 +113,7 @@
 
 #ifdef CONFIG_ATOMICS
 #include <pthread.h>
-#include <stdatomic.h>
+#include <c11atomic.h>
 #include <errno.h>
 #endif
 

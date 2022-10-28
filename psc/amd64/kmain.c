@@ -324,17 +324,21 @@ kmain(void *arg)
 
 	mutex_init(&mtx);
 
+	void helloc();
+	helloc();
+
 	kprintf("vm_pagedaemon: hello\n");
 	test = thread_new(&task0, fun2, (void *)100);
 	kprintf("vm_pagedaemon: made thread2\n");
 	thread_resume(test);
 	kprintf("vm_pagedaemon: thread2 resumed\n");
 
+
+
 	done();
 }
 
 #include <qjs/quickjs.h>
-
 
 void
 print_obj(JSContext *ctx, JSValueConst obj);
@@ -389,7 +393,7 @@ _start(void)
 		done();
 	}
 
-	kprintf("Scriptigent Platform-Specific Code for AMD64\n");
+	kprintf("Oopsilon Platform-Specific Code for AMD64\n");
 
 	idt_init();
 	idt_load();

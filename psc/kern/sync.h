@@ -18,7 +18,7 @@
 
 #include <sys/queue.h>
 
-#include <stdatomic.h>
+#include <c11atomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

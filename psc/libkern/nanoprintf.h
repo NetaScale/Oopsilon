@@ -3,16 +3,12 @@
    charles.nicholson+nanoprintf@gmail.com
    dual-licensed under 0bsd AND unlicense, see end of file for details. */
 
-#ifndef NANOPRINTF_H_INCLUDED
-#define NANOPRINTF_H_INCLUDED
-
-#include <machine/spl.h>
-#include <kern/sync.h>
+#ifndef NANOPRINTF_H_
+#define NANOPRINTF_H_
 
 #include <stdarg.h>
 #include <stddef.h>
 
-extern spinlock_t lock_msgbuf;
 #define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS 1
 #define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
 #define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS 1
@@ -57,7 +53,7 @@ NPF_VISIBILITY int npf_vpprintf(npf_putc pc, void *pc_ctx, char const *format,
 }
 #endif
 
-#endif // NANOPRINTF_H_INCLUDED
+#endif /* NANOPRINTF_H_ */
 
 /* The implementation of nanoprintf begins here, to be compiled only if
    NANOPRINTF_IMPLEMENTATION is defined. In a multi-file library what follows would
@@ -68,8 +64,13 @@ NPF_VISIBILITY int npf_vpprintf(npf_putc pc, void *pc_ctx, char const *format,
 #ifndef NANOPRINTF_IMPLEMENTATION_INCLUDED
 #define NANOPRINTF_IMPLEMENTATION_INCLUDED
 
+#include <machine/spl.h>
+#include <kern/sync.h>
+
 #include <inttypes.h>
 #include <stdint.h>
+
+extern spinlock_t lock_msgbuf;
 
 // Pick reasonable defaults if nothing's been configured.
 #if !defined(NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS) && \

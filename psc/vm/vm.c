@@ -15,7 +15,6 @@
 #include <machine/intr.h>
 #include <vm/vm.h>
 
-#include <stdatomic.h>
 #include <string.h>
 
 /*!
@@ -143,6 +142,8 @@ fault_aobj(vm_map_t *map, vm_object_t *aobj, vaddr_t vaddr, voff_t voff,
 	return 0;
 }
 
+extern spinlock_t lock_msgbuf;
+
 int
 vm_fault(md_intr_frame_t *frame, vm_map_t *map, vaddr_t vaddr,
     vm_fault_flags_t flags)
@@ -150,13 +151,6 @@ vm_fault(md_intr_frame_t *frame, vm_map_t *map, vaddr_t vaddr,
 	int r;
 	vm_map_entry_t *ent;
 	voff_t		obj_off;
-
-	if (curthread()->in_pagefault) {
-		spinlock_unlock(&lock_msgbuf);
-		md_intr_frame_trace(frame);
-		fatal("Nested page fault\n");
-	}
-	curthread()->in_pagefault = true;
 
 #ifdef DEBUG_VM_FAULT
 	kprintf("vm_fault: in map %p at addr %p (flags: %d)\n", map, vaddr,
@@ -197,8 +191,6 @@ unlockall:
 	mutex_unlock(&ent->obj->lock);
 unlockmap:
 	mutex_unlock(&map->lock);
-
-	curthread()->in_pagefault = false;
 
 	return r;
 }

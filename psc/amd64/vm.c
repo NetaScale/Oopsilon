@@ -386,7 +386,7 @@ pmap_invlpg(vaddr_t addr)
 
 static spinlock_t invlpg_global_lock = SPINLOCK_INITIALISER;
 vaddr_t		  invlpg_addr;
-volatile atomic_int invlpg_done_cnt;
+volatile int invlpg_done_cnt;
 
 void
 pmap_global_invlpg(vaddr_t vaddr)

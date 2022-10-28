@@ -15,20 +15,31 @@
 #include <kern/sync.h>
 
 #include <math.h>
+#include <stdint.h>
 
 #define NON_BUILTINS
 
 #include <libkern/klib.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 
 spinlock_t lock_msgbuf = SPINLOCK_INITIALISER;
+int __mlibc_errno;
 
 #define NANOPRINTF_IMPLEMENTATION
 #include "nanoprintf.h"
 
+FILE* stderr = (FILE*)-1;
+
 /* ctype.h */
+int isalpha(char c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
 int
 isdigit(char c)
 {
@@ -46,7 +57,25 @@ isspace(char c)
 	return 0;
 }
 
+int isupper(char c)
+{
+	return (c >= 'A' && c <= 'Z');
+}
+
+int isxdigit(char c)
+{
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
 /* stdio.h */
+
+size_t
+fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
+{
+	for (size_t i = 0; i < size * nmemb; i++)
+		md_kputc(*(char *)(ptr + i), NULL);
+}
+
 int
 fprintf(FILE *stream, const char *format, ...)
 {
@@ -58,11 +87,53 @@ fprintf(FILE *stream, const char *format, ...)
 	return r;
 }
 
-size_t
-fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
+int
+printf(const char *__restrict format, ...)
 {
-	for (size_t i = 0; i < size * nmemb; i++)
-		md_kputc(*(char *)(ptr + i), NULL);
+	va_list ap;
+	int	r;
+	va_start(ap, format);
+	r = kvpprintf(format, ap);
+	va_end(ap);
+	return r;
+}
+
+int putchar(int c)
+{
+	md_kputc(c, NULL);
+}
+
+int sprintf(char *__restrict buffer, const char *__restrict format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	int result = kvsnprintf(buffer, INT32_MAX, format, args);
+	va_end(args);
+	return result;
+}
+
+int
+snprintf(char *__restrict buffer, size_t max_size,
+    const char *__restrict format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	int result = kvsnprintf(buffer, max_size, format, args);
+	va_end(args);
+	return result;
+}
+
+int vfprintf(FILE *__restrict stream, const char *__restrict format, __gnuc_va_list args)
+{
+	return kvpprintf(format, args);
+}
+
+
+int
+vsnprintf(char *__restrict buffer, size_t	  max_size,
+    const char *__restrict format, __gnuc_va_list args)
+{
+	return kvsnprintf(buffer, max_size, format, args);
 }
 
 /* stdlib.h */
@@ -104,10 +175,10 @@ char *q;
 	return p;
 }
 
-double strtod(str, end) const char *str;
+long double strtold(str, end) const char *str;
 char **end;
 {
-	double	    d = 0.0;
+	long double	    d = 0.0;
 	int	    sign;
 	int	    n = 0;
 	const char *p, *a;
@@ -123,9 +194,9 @@ char **end;
 	} else if (*p == '+')
 		++p;
 	if (isdigit(*p)) {
-		d = (double)(*p++ - '0');
+		d = (long double)(*p++ - '0');
 		while (*p && isdigit(*p)) {
-			d = d * 10.0 + (double)(*p - '0');
+			d = d * 10.0 + (long double)(*p - '0');
 			++p;
 			++n;
 		}
@@ -136,8 +207,8 @@ char **end;
 
 	/* fraction part */
 	if (*p == '.') {
-		double f = 0.0;
-		double base = 0.1;
+		long double f = 0.0;
+		long double base = 0.1;
 		++p;
 
 		if (isdigit(*p)) {
@@ -191,7 +262,7 @@ char **end;
 			a = p;
 			goto done;
 		}
-		d *= pow(10.0, (double)e);
+		d *= pow(10.0, (long double)e);
 		a = p;
 	} else if (p > str && !isdigit(*(p - 1))) {
 		a = str;
@@ -204,6 +275,47 @@ done:
 	return d;
 }
 
+double strtod(const char *str,
+char **end)
+{
+	return strtold(str, end);
+}
+
+float strtof(const char *str,
+char **end)
+{
+	return strtold(str, end);
+}
+
+void *
+malloc(size_t size)
+{
+	return liballoc_kmalloc(size);
+}
+
+void
+free(void *ptr)
+{
+	return liballoc_kfree(ptr);
+}
+
+void *
+calloc(size_t nmemb, size_t size)
+{
+	return liballoc_kcalloc(nmemb, size);
+}
+
+void *
+realloc(void *ptr, size_t size)
+{
+	return liballoc_krealloc(ptr, size);
+}
+
+int posix_memalign(void **memptr, size_t alignment, size_t size)
+{
+	*memptr = malloc(size);
+	return 0;
+}
 
 /* string.h */
 
@@ -284,6 +396,24 @@ strcmp(const char *s1, const char *s2)
 	return (*(const unsigned char *)s1 - *(const unsigned char *)--s2);
 }
 
+int strncmp(const char *a, const char *b, size_t max_size) {
+	size_t i = 0;
+	while(true) {
+		if(!(i < max_size))
+			return 0;
+		unsigned char a_byte = a[i];
+		unsigned char b_byte = b[i];
+		if(!a_byte && !b_byte)
+			return 0;
+		// If only one char is null, one of the following cases applies.
+		if(a_byte < b_byte)
+			return -1;
+		if(a_byte > b_byte)
+			return 1;
+		i++;
+	}
+}
+
 char *
 strchr(const char *s, int c)
 {
@@ -340,4 +470,296 @@ gettimeofday(struct timeval *restrict tv, void *tz)
 	tv->tv_sec = 0;
 	tv->tv_usec = 0;
 	return 0;
+}
+
+/* mlibc support */
+void
+abort(void)
+{
+	fatal("libc abort.");
+}
+
+void
+__assert_fail(const char *assertion, const char *file, unsigned int line,
+    const char *function)
+{
+	kprintf("In function %s, file %s:%d: Assertion '%s' failed!\n",
+	    function, file, line, assertion);
+	abort();
+}
+
+
+/* strtoll etc */
+
+typedef long long llong_type;
+typedef unsigned long long ullong_type;
+
+long
+strtol(const char *nptr, char **endptr, register int base)
+{
+	register const char *s = nptr;
+	register unsigned long acc;
+	register int c;
+	register unsigned long cutoff;
+	register int neg = 0, any, cutlim;
+
+	/*
+	 * Skip white space and pick up leading +/- sign if any.
+	 * If base is 0, allow 0x for hex and 0 for octal, else
+	 * assume decimal; if base is already 16, allow 0x.
+	 */
+	do {
+		c = *s++;
+	} while (isspace(c));
+	if (c == '-') {
+		neg = 1;
+		c = *s++;
+	} else if (c == '+')
+		c = *s++;
+	if ((base == 0 || base == 16) &&
+	    c == '0' && (*s == 'x' || *s == 'X')) {
+		c = s[1];
+		s += 2;
+		base = 16;
+	}
+	if (base == 0)
+		base = c == '0' ? 8 : 10;
+
+	/*
+	 * Compute the cutoff value between legal numbers and illegal
+	 * numbers.  That is the largest legal value, divided by the
+	 * base.  An input number that is greater than this value, if
+	 * followed by a legal input character, is too big.  One that
+	 * is equal to this value may be valid or not; the limit
+	 * between valid and invalid numbers is then based on the last
+	 * digit.  For instance, if the range for longs is
+	 * [-2147483648..2147483647] and the input base is 10,
+	 * cutoff will be set to 214748364 and cutlim to either
+	 * 7 (neg==0) or 8 (neg==1), meaning that if we have accumulated
+	 * a value > 214748364, or equal but the next digit is > 7 (or 8),
+	 * the number is too big, and we will return a range error.
+	 *
+	 * Set any if any `digits' consumed; make it negative to indicate
+	 * overflow.
+	 */
+	cutoff = neg ? -(unsigned long)LONG_MIN : LONG_MAX;
+	cutlim = cutoff % (unsigned long)base;
+	cutoff /= (unsigned long)base;
+	for (acc = 0, any = 0;; c = *s++) {
+		if (isdigit(c))
+			c -= '0';
+		else if (isalpha(c))
+			c -= isupper(c) ? 'A' - 10 : 'a' - 10;
+		else
+			break;
+		if (c >= base)
+			break;
+		if (any < 0 || acc > cutoff || (acc == cutoff && c > cutlim))
+			any = -1;
+		else {
+			any = 1;
+			acc *= base;
+			acc += c;
+		}
+	}
+	if (any < 0) {
+		acc = neg ? LONG_MIN : LONG_MAX;
+		errno = ERANGE;
+	} else if (neg)
+		acc = -acc;
+	if (endptr != 0)
+		*endptr = (char *) (any ? s - 1 : nptr);
+	return (acc);
+}
+
+llong_type
+strtoll(const char *nptr, char **endptr, register int base)
+{
+	register const char *s = nptr;
+	register ullong_type acc;
+	register int c;
+	register ullong_type cutoff;
+	register int neg = 0, any, cutlim;
+
+	/*
+	 * Skip white space and pick up leading +/- sign if any.
+	 * If base is 0, allow 0x for hex and 0 for octal, else
+	 * assume decimal; if base is already 16, allow 0x.
+	 */
+	do {
+		c = *s++;
+	} while (isspace(c));
+	if (c == '-') {
+		neg = 1;
+		c = *s++;
+	} else if (c == '+')
+		c = *s++;
+	if ((base == 0 || base == 16) &&
+	    c == '0' && (*s == 'x' || *s == 'X')) {
+		c = s[1];
+		s += 2;
+		base = 16;
+	}
+	if (base == 0)
+		base = c == '0' ? 8 : 10;
+
+	/*
+	 * Compute the cutoff value between legal numbers and illegal
+	 * numbers.  That is the largest legal value, divided by the
+	 * base.  An input number that is greater than this value, if
+	 * followed by a legal input character, is too big.  One that
+	 * is equal to this value may be valid or not; the limit
+	 * between valid and invalid numbers is then based on the last
+	 * digit.  For instance, if the range for longs is
+	 * [-2147483648..2147483647] and the input base is 10,
+	 * cutoff will be set to 214748364 and cutlim to either
+	 * 7 (neg==0) or 8 (neg==1), meaning that if we have accumulated
+	 * a value > 214748364, or equal but the next digit is > 7 (or 8),
+	 * the number is too big, and we will return a range error.
+	 *
+	 * Set any if any `digits' consumed; make it negative to indicate
+	 * overflow.
+	 */
+	cutoff = neg ? -(ullong_type)LLONG_MIN : LLONG_MAX;
+	cutlim = cutoff % (ullong_type)base;
+	cutoff /= (ullong_type)base;
+	for (acc = 0, any = 0;; c = *s++) {
+		if (isdigit(c))
+			c -= '0';
+		else if (isalpha(c))
+			c -= isupper(c) ? 'A' - 10 : 'a' - 10;
+		else
+			break;
+		if (c >= base)
+			break;
+		if (any < 0 || acc > cutoff || (acc == cutoff && c > cutlim))
+			any = -1;
+		else {
+			any = 1;
+			acc *= base;
+			acc += c;
+		}
+	}
+	if (any < 0) {
+		acc = neg ? LLONG_MIN : LLONG_MAX;
+		errno = ERANGE;
+	} else if (neg)
+		acc = -acc;
+	if (endptr != 0)
+		*endptr = (char *) (any ? s - 1 : nptr);
+	return (acc);
+}
+
+unsigned long
+strtoul(const char *nptr, char **endptr, register int base)
+{
+	register const char *s = nptr;
+	register unsigned long acc;
+	register int c;
+	register unsigned long cutoff;
+	register int neg = 0, any, cutlim;
+
+	/*
+	 * See strtol for comments as to the logic used.
+	 */
+	do {
+		c = *s++;
+	} while (isspace(c));
+	if (c == '-') {
+		neg = 1;
+		c = *s++;
+	} else if (c == '+')
+		c = *s++;
+	if ((base == 0 || base == 16) &&
+	    c == '0' && (*s == 'x' || *s == 'X')) {
+		c = s[1];
+		s += 2;
+		base = 16;
+	}
+	if (base == 0)
+		base = c == '0' ? 8 : 10;
+	cutoff = (unsigned long)ULONG_MAX / (unsigned long)base;
+	cutlim = (unsigned long)ULONG_MAX % (unsigned long)base;
+	for (acc = 0, any = 0;; c = *s++) {
+		if (isdigit(c))
+			c -= '0';
+		else if (isalpha(c))
+			c -= isupper(c) ? 'A' - 10 : 'a' - 10;
+		else
+			break;
+		if (c >= base)
+			break;
+		if (any < 0 || acc > cutoff || (acc == cutoff && c > cutlim))
+			any = -1;
+		else {
+			any = 1;
+			acc *= base;
+			acc += c;
+		}
+	}
+	if (any < 0) {
+		acc = ULONG_MAX;
+		errno = ERANGE;
+	} else if (neg)
+		acc = -acc;
+	if (endptr != 0)
+		*endptr = (char *) (any ? s - 1 : nptr);
+	return (acc);
+}
+
+ullong_type
+strtoull(const char *nptr, char **endptr, register int base)
+{
+	register const char *s = nptr;
+	register ullong_type acc;
+	register int c;
+	register ullong_type cutoff;
+	register int neg = 0, any, cutlim;
+
+	/*
+	 * See strtol for comments as to the logic used.
+	 */
+	do {
+		c = *s++;
+	} while (isspace(c));
+	if (c == '-') {
+		neg = 1;
+		c = *s++;
+	} else if (c == '+')
+		c = *s++;
+	if ((base == 0 || base == 16) &&
+	    c == '0' && (*s == 'x' || *s == 'X')) {
+		c = s[1];
+		s += 2;
+		base = 16;
+	}
+	if (base == 0)
+		base = c == '0' ? 8 : 10;
+	cutoff = (ullong_type)ULLONG_MAX / (ullong_type)base;
+	cutlim = (ullong_type)ULLONG_MAX % (ullong_type)base;
+	for (acc = 0, any = 0;; c = *s++) {
+		if (isdigit(c))
+			c -= '0';
+		else if (isalpha(c))
+			c -= isupper(c) ? 'A' - 10 : 'a' - 10;
+		else
+			break;
+		if (c >= base)
+			break;
+		if (any < 0 || acc > cutoff || (acc == cutoff && c > cutlim))
+			any = -1;
+		else {
+			any = 1;
+			acc *= base;
+			acc += c;
+		}
+	}
+	if (any < 0) {
+		acc = ULLONG_MAX;
+		errno = ERANGE;
+	} else if (neg)
+		acc = -acc;
+	if (endptr != 0)
+		*endptr = (char *) (any ? s - 1 : nptr);
+	return (acc);
 }

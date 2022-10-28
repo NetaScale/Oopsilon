@@ -91,11 +91,19 @@ pagefault_interrupt(md_intr_frame_t *frame, void *unused)
 
 	(void)unused;
 
+	if (curthread()->in_pagefault) {
+		extern spinlock_t lock_msgbuf;
+		spinlock_unlock(&lock_msgbuf);
+		// md_intr_frame_trace(frame);
+		fatal("Nested page fault\n");
+	}
+	curthread()->in_pagefault = true;
 	r = vm_fault(frame, curtask()->map, (vaddr_t)read_cr2(), frame->code);
 	if (r < 0) {
 		md_intr_frame_trace(frame);
 		fatal("unhandled page fault at RIP 0x%lx\n", frame->rip);
 	}
+	curthread()->in_pagefault = false;
 }
 
 void
@@ -140,14 +148,15 @@ handle_int(md_intr_frame_t *frame, uintptr_t num)
 		return;
 	} else if (num == kIntNumInvlPG) {
 		extern vaddr_t		   invlpg_addr;
-		extern volatile atomic_int invlpg_done_cnt;
+		extern volatile int	   invlpg_done_cnt;
 		pmap_invlpg(invlpg_addr);
-		atomic_fetch_add(&invlpg_done_cnt, 1);
+		__atomic_fetch_add(&invlpg_done_cnt, 1, __ATOMIC_SEQ_CST);
 		lapic_eoi();
 		return;
 	}
 
 	if (md_intrs[num].handler == NULL) {
+		kprintf("Unhandled interrupt %lu. Stack trace:\n", num);
 		md_intr_frame_trace(frame);
 		fatal("unhandled interrupt %lu\n", num);
 	}

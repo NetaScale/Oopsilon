@@ -309,7 +309,11 @@ thread_new(task_t *task, void (*fun)(void *arg), void *arg)
 	thread->md.frame.rip = (uintptr_t)fun;
 	thread->md.frame.rdi = (uintptr_t)arg;
 	thread->md.frame.rbp = 0;
-	thread->md.frame.rsp = (uintptr_t)thread->kstack;
+	/*
+	 * subtract 8 since there is no `call` prior to executing the function
+	 * so its push %rbp will misalign the stack
+	 */
+	thread->md.frame.rsp = (uintptr_t)thread->kstack - 8;
 
 	return thread;
 }
