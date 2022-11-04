@@ -90,3 +90,10 @@ __asan_handle_no_return()
 {
 	/* epsilon */
 }
+
+void
+__sanitizer_annotate_contiguous_container(const void *beg, const void *end,
+    const void *new_mid, const void *old_mid)
+{
+	/* epsilon */
+}

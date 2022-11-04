@@ -12,4 +12,5 @@ vxkern = executable('vxkern', kern_srcs,
       '/opt/x86_64-elf/lib/gcc/x86_64-elf/12.2.0/crtend.o' ],
     link_with: [ libm, klibcxxabi, klibcxx ],
     include_directories: [ kern_incs ],
+	dependencies: [ lemon_headers ]
 )

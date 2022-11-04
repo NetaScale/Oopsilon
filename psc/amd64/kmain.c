@@ -334,51 +334,8 @@ kmain(void *arg)
 	kprintf("vm_pagedaemon: thread2 resumed\n");
 
 
-
 	done();
 }
-
-#include <qjs/quickjs.h>
-
-void
-print_obj(JSContext *ctx, JSValueConst obj);
-
-void
-log_error(JSContext *ctx, JSValueConst exc)
-{
-	print_obj(ctx, exc);
-
-	if (JS_IsError(ctx, exc)) {
-		JSValue val = JS_GetPropertyStr(ctx, exc, "stack");
-		if (!JS_IsUndefined(val))
-			print_obj(ctx, val);
-		JS_FreeValue(ctx, val);
-	}
-}
-
-
-void
-print_obj(JSContext *ctx, JSValueConst obj)
-{
-	const char *str = JS_ToCString(ctx, obj);
-
-	if (!str) {
-		kprintf("[unknown]\n");
-		return;
-	}
-
-	kprintf("%s", str);
-	JS_FreeCString(ctx, str);
-}
-
-void
-log_exception(JSContext *ctx)
-{
-	JSValue exc = JS_GetException(ctx);
-	log_error(ctx, exc);
-	JS_FreeValue(ctx, exc);
-}
-
 
 // The following will be our kernel's entry point.
 void
@@ -406,22 +363,11 @@ _start(void)
 	kmem_init();
 	smp_init();
 
-	JSRuntime  *rt = JS_NewRuntime();
-	JSContext  *ctx = JS_NewContext(rt);
-	const char *script = " 4+4;";
-	JSValue res = JS_Eval(ctx, script, strlen(script), "interactive", 0);
-	const char * txt = JS_ToCString(ctx, res);
-	kprintf("Res: %s\n", txt? txt : "<NULL>");
-	if (JS_IsException(res)) {
-		log_exception(ctx);
-		
-	}
-
 	thread_t *vm_pagedaemon = thread_new(&task0, kmain, 0);
 	kprintf("thread0: made vm_pagedaemon\n");
 	thread_resume(vm_pagedaemon);
 
-	/* this thread is now the idle thread */
+	/* this thread is now the bootstrap processor's idle thread */
 
 #if 0
 	kprintf("thread0: after resuming vm_pagedaemon\n");
